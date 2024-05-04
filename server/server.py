@@ -59,6 +59,7 @@ app = web.Application()
 sio.attach(app)
 
 user_map = {}
+sid_map = {}
 @sio.event
 def connect(sid, environ):
     print('connect ', sid)
@@ -70,8 +71,13 @@ async def pongi(sid, data):
 @sio.on('register_user')
 async def on_register_user(sid, data):
     user_map[data["username"]] = sid
+    sid_map[sid] = data["username"]
     add_user(data["username"], data["ik"],  data["sik"], data["spk"], data["spk_sig"])
     return True
+
+@sio.on('request_users')
+async def on_request_users(sid):
+    return list(user_map.keys())
 
 @sio.on('request_prekey')
 async def on_request_prekey(sid, data):
@@ -101,6 +107,9 @@ async def on_ratchet_msg(sid, data):
 @sio.event
 async def disconnect(sid):
     print('disconnect')
+    if sid in sid_map and sid_map[sid] in user_map:
+        del user_map[sid_map[sid]]
+        del sid_map[sid]
 if __name__ == '__main__':
 
     web.run_app(app)

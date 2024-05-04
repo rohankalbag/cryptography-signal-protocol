@@ -32,6 +32,7 @@ class User():
         self.generate_user()
 
     def init_ratchet_transmission(self, username):
+        self.messages[username] = []
         # alice ka code
         SK = self.x3dh_session[username]['sk']
         self.ratchet_session[username] = {}
@@ -48,6 +49,7 @@ class User():
         self.ratchet_session[username]["MKSKIPPED"] = {}
     
     def init_ratchet_reciever(self, username):
+        self.messages[username] = []
         SK = self.x3dh_session[username]['sk']
         recipient_dh_sk = self.x3dh_session[username]['spk']
         self.ratchet_session[username] = {}
@@ -87,7 +89,7 @@ class User():
 
     def register_user(self):
         user = self.serialize_user()
-        sio.call("register_user", user)
+        return sio.call("register_user", user)
     def request_user_prekey_bundle(self, username):
         res = sio.call("request_prekey", {"username": username})
         if(not res[0]):
@@ -116,10 +118,14 @@ class User():
         ad = self.x3dh_session[username]['ad']
         header, ciphertext = RatchetEncrypt(self.ratchet_session[username], msg.encode('utf-8'), ad.encode('utf-8'))
         ciphertext, mac = ciphertext
-    
+        self.messages[username].append((self.username, msg ))
         return sio.call("ratchet_msg", {'username': username,'cipher': serialize(ciphertext), 'header': header.serialize(), 'hmac': serialize(mac), 'from': self.username})
         
-    
+    def is_connected(self, username):
+        if username in self.x3dh_session:
+            return True
+        else:
+            return False
     def recieve_message(self, username, msg):
         header = Header.deserialize(msg['header'])
         ciphertext = deserialize(msg['cipher'])
@@ -127,7 +133,8 @@ class User():
         ad = self.x3dh_session[username]['ad']
         plaintext = RatchetDecrypt(self.ratchet_session[username], header, (ciphertext, hmac), ad.encode('utf-8'))
         print("recv:", plaintext)
-        self.messages[username].append(plaintext.decode('utf-8'))
+        self.messages[username].append((username, plaintext.decode('utf-8') ))
+        return plaintext.decode('utf-8')
 
     def receive_x3dh(self, username, data):
         # print(data)
@@ -209,16 +216,18 @@ class User():
 
 
 
-@sio.on('x3dh_message')
-def on_x3dh_message(data):
-    user.receive_x3dh(data["from"], data)
-    return True
+def reg_callback(user, msg_event=lambda x: x):
+    @sio.on('x3dh_message')
+    def on_x3dh_message(data):
+        user.receive_x3dh(data["from"], data)
+        return True
 
-@sio.on('ratchet_msg')
-def on_ratchet_msg(data):
-    print(data)
-    user.recieve_message(data["from"], data)
-    return True
+    @sio.on('ratchet_msg')
+    def on_ratchet_msg(data):
+        print(data)
+        
+        msg_event(user.recieve_message(data["from"], data))
+        return True
 
 
 if __name__ == "main":
