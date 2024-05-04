@@ -5,20 +5,15 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from cryptography.hazmat.primitives import hashes
 
-from utils import ENCRYPT_X3DH, DECRYPT_X3DH, GENERATE_DH, DH, KDF_RK, RatchetEncrypt, RatchetDecrypt, Header
+from .utils import ENCRYPT_X3DH, DECRYPT_X3DH, GENERATE_DH, DH, KDF_RK, RatchetEncrypt, RatchetDecrypt, Header
 import base64
 import argparse
 
-parser = argparse.ArgumentParser(description="Process username and boolean arguments")
-parser.add_argument("username", help="The username")
-parser.add_argument("--initiate", action="store_true", help="Boolean flag to indicate initiation")
-parser.add_argument("--target", help="The target username")
 
-args = parser.parse_args()
 
-SERVER = 'http://localhost:6969'
+SERVER = 'http://localhost:8080'
 
-sio = socketio.Client()
+sio = socketio.Client(logger=True)
 sio.connect(SERVER)
 
 def serialize(val):
@@ -33,7 +28,7 @@ class User():
         self.sessions = {}
         self.x3dh_session = {}
         self.ratchet_session = {}
-        self.messages = []
+        self.messages = {}
         self.generate_user()
 
     def init_ratchet_transmission(self, username):
@@ -118,23 +113,21 @@ class User():
         }
 
     def send_message(self, username, msg):
-        #BHAMRU : CHECK THIS
         ad = self.x3dh_session[username]['ad']
         header, ciphertext = RatchetEncrypt(self.ratchet_session[username], msg.encode('utf-8'), ad.encode('utf-8'))
         ciphertext, mac = ciphertext
-        print("done")
-        return sio.call("msg_topic", {'username': username,'header': header.serialize(), 'cipher': serialize(ciphertext), 'hmac': serialize(mac), 'from': self.username})
+    
+        return sio.call("ratchet_msg", {'username': username,'cipher': serialize(ciphertext), 'header': header.serialize(), 'hmac': serialize(mac), 'from': self.username})
         
     
     def recieve_message(self, username, msg):
-        #BHAMRU : CHECK THIS
         header = Header.deserialize(msg['header'])
         ciphertext = deserialize(msg['cipher'])
         hmac = deserialize(msg['hmac'])
         ad = self.x3dh_session[username]['ad']
         plaintext = RatchetDecrypt(self.ratchet_session[username], header, (ciphertext, hmac), ad.encode('utf-8'))
         print("recv:", plaintext)
-        self.messages.append(plaintext)
+        self.messages[username].append(plaintext.decode('utf-8'))
 
     def receive_x3dh(self, username, data):
         # print(data)
@@ -166,11 +159,13 @@ class User():
         ad  = serialize(ika_bytes) +  serialize(self.ik.public_key().public_bytes_raw()) 
         res = DECRYPT_X3DH(SK, cipher, hmac, ad.encode('utf-8'))
         if(res[0]):
-            print("diffie hellman done", res[1])
             self.x3dh_session[username] = {"sk" : SK, "spk": self.spk, "ad": ad}
             self.init_ratchet_reciever(username)
         else:
-            print("Failed")
+            print("DH Failed")
+            return False
+        
+        return True
     def perform_x3dh(self, username):
         if(not username in self.sessions):
             print("User key bundles not requested!")
@@ -206,9 +201,12 @@ class User():
 
         self.x3dh_session[username] = {"sk" : SK, "spk": self.sessions[username]['spk'], "ad": ad}
         res = sio.call("x3dh_message", {"username": username, "from": self.username, "ik": serialize(ik_bytes), "epk": serialize(epk_pub_bytes), "cipher": serialize(ciphertext), "hmac":serialize(hmac)})
-        self.init_ratchet_transmission(username)
-user= User(args.username)
-user.register_user()
+        if res:
+            self.init_ratchet_transmission(username)
+        else:
+            print("DH Failed!")
+        return res
+
 
 
 @sio.on('x3dh_message')
@@ -216,21 +214,29 @@ def on_x3dh_message(data):
     user.receive_x3dh(data["from"], data)
     return True
 
-@sio.on('msg_topic')
+@sio.on('ratchet_msg')
 def on_ratchet_msg(data):
-    print("die")
-    return True
     print(data)
     user.recieve_message(data["from"], data)
     return True
 
 
-if(args.initiate):
-    user.request_user_prekey_bundle(args.target)
-    user.perform_x3dh(args.target)
-    print(user.send_message(args.target, "Hello"))
-    # user.send_message(args.target, "Bye")
-    print("done")
+if __name__ == "main":
+    parser = argparse.ArgumentParser(description="Process username and boolean arguments")
+    parser.add_argument("username", help="The username")
+    parser.add_argument("--initiate", action="store_true", help="Boolean flag to indicate initiation")
+    parser.add_argument("--target", help="The target username")
 
-sio.wait()
+    args = parser.parse_args()
+    user= User(args.username)
+    user.register_user()
+    if(args.initiate):
+        user.request_user_prekey_bundle(args.target)
+        user.perform_x3dh(args.target)
+        print(user.send_message(args.target, "Hello"))
+        user.send_message(args.target, "Bye")
+        print("done")
+
+        
+    sio.wait()
 

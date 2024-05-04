@@ -78,11 +78,12 @@ class Header:
         self.n = n
     
     def serialize(self):
-        return {'dh': serialize(self.dh), 'pn': self.pn, 'n': self.n}
+        print(self.pn, self.n, "alpha")
+        return {'dh': serialize(self.dh), 'pn': serialize(self.pn), 'n': serialize(self.n)}
 
     @staticmethod
     def deserialize(val):
-        return Header(deserialize(val['dh']), val['pn'], val['n'])
+        return Header(deserialize(val['dh']), deserialize(val['pn']), deserialize(val['n']))
     
 
 def HEADER(dh_pair, pn, n):
@@ -117,7 +118,7 @@ def RatchetDecrypt(state, header, ciphertext, AD):
     return unpadder.update(padded_plain_text) + unpadder.finalize()
 
 def TrySkippedMessageKeys(state, header, ciphertext, AD):
-    if (header.dh, int.from_bytes(header.n)) in state.MKSKIPPED:
+    if (header.dh, int.from_bytes(header.n)) in state["MKSKIPPED"]:
         mk = state["MKSKIPPED"][header.dh, int.from_bytes(header.n)]
         del state["MKSKIPPED"][header.dh, int.from_bytes(header.n)]
         return DECRYPT_DOUB_RATCH(mk, ciphertext, CONCAT(AD, header))
@@ -143,7 +144,7 @@ def DHRatchet(state, header):
     state["Nr"] = 0
     state["DHr"] = x25519.X25519PublicKey.from_public_bytes(header.dh)
     state["RK"], state["CKr"] = KDF_RK(state["RK"], DH(state["DHs"], state["DHr"]))
-    state.DHs = GENERATE_DH()
+    state["DHs"] = GENERATE_DH()
     state["RK"], state["CKs"] = KDF_RK(state["RK"], DH(state["DHs"], state["DHr"]))
 
 def ENCRYPT_DOUB_RATCH(mk, plaintext, associated_data):

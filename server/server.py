@@ -1,6 +1,7 @@
 from tinydb import TinyDB, Query
-import eventlet
+from aiohttp import web
 import socketio
+
 
 db = TinyDB('user_keys.json')
 db.truncate()
@@ -52,22 +53,28 @@ def request_prekey(username):
 
     return {"ik": user['ik'], "sik": user['sik'], "spk": user['spk'], "spk_sign": user['spk_sign']}
 
-sio = socketio.Server()
-app = socketio.WSGIApp(sio)
+sio = socketio.AsyncServer(logger=True, engineio_logger=True)
+app = web.Application()
+
+sio.attach(app)
 
 user_map = {}
 @sio.event
 def connect(sid, environ):
     print('connect ', sid)
 
+@sio.on('pongi')
+async def pongi(sid, data):
+    await sio.emit("pingi", "sankalp")
+    return True
 @sio.on('register_user')
-def on_register_user(sid, data):
+async def on_register_user(sid, data):
     user_map[data["username"]] = sid
     add_user(data["username"], data["ik"],  data["sik"], data["spk"], data["spk_sig"])
     return True
 
 @sio.on('request_prekey')
-def on_request_prekey(sid, data):
+async def on_request_prekey(sid, data):
     try:
         prekey_bundle = request_prekey(data["username"])
     except:
@@ -75,30 +82,25 @@ def on_request_prekey(sid, data):
     return (True, prekey_bundle)
 
 @sio.on('x3dh_message')
-def on_x3dh_message(sid, data):
+async def on_x3dh_message(sid, data):
     if not data['username'] in user_map:
         return False
     
-    res = sio.call('x3dh_message', data, sid=user_map[data['username']])
+    res = await sio.call('x3dh_message', data, sid=user_map[data['username']])
     return res
 
 
-@sio.on('msg_topic')
-def on_msg_topic(sid, data):
+@sio.on('ratchet_msg')
+async def on_ratchet_msg(sid, data):
     if not data['username'] in user_map:
         return False
-    print("um:",user_map)
-    res = sio.emit('msg_topic', data)
-    return "sankalp"
+
+    res = await sio.call('ratchet_msg', data, sid=user_map[data['username']])
+    return res
 
 @sio.event
-def disconnect(sid):
-    print('disconnect ', sid)
-
-@sio.on('bob_message')
-def bob_message(sid, data):
-    print('message received with ', data)
-
-    sio.emit('callback', {'message': 'Callback received'}, room=sid)
+async def disconnect(sid):
+    print('disconnect')
 if __name__ == '__main__':
-    eventlet.wsgi.server(eventlet.listen(('', 6969)), app)
+
+    web.run_app(app)
