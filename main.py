@@ -88,6 +88,7 @@ class SelectScreen(QWidget):
 
         # Create main layout
         self.main_layout = QVBoxLayout()
+        self.main_layout.addWidget(QLabel(f"Hi {username}!"))
         self.main_layout.addWidget(QLabel("<h2>Connect to:</h2>"))
 
         # Refresh button
@@ -150,6 +151,7 @@ class ChatScreen(QWidget):
         toolbar_layout = QHBoxLayout()
         xlayout.addLayout(toolbar_layout)
         toolbar_layout.addWidget(back_button)
+        toolbar_layout.addWidget(QLabel(f"{username} -> {target_user}"))
 
         # Add text area for chat history
         self.chat_history = QTextEdit()
